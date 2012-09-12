@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>ts.ericbarch.com Lobby Monitor</title>
+
+<style>
+html,body{font:normal 0.9em arial,helvetica; background-color:#333; color:#ddd;}
+.noPad {padding:0; margin:0.1em;}
+#content-body-wrapper{display:table; border-collapse:collapse; width:100%;}
+#header-body{display:table-row;}
+#content-body{display:table-row;}
+.left{display:table-cell; border: 1px solid #ccc;}
+.right{display:table-cell; width: 270px; border: 1px solid #ccc;}
+.overflow {overflow:auto;}
+a:link{color:#3366AA;}
+a:visited{color:#3366AA;}
+a:hover{color:#3366FF;}
+a:active{color:#3366AA;}
+</style>
+
+<script src="http://code.jquery.com/jquery-latest.js"></script>
+<script src="socket.io.js"></script>
+
+<script>
+
+var onceConnected = false;
+
+function init() {
+    document.getElementById('media').style.height = (window.innerHeight - 35)+"px";
+    document.getElementById('log').style.height = (window.innerHeight - 35)+"px";
+
+    var s = new io.Socket(window.location.hostname, {port: 9090, rememberTransport: false});
+    s.connect();
+
+    s.addEvent('message', function(data) {
+		if (data.msg == '!done' && data.user == '') {
+			onceConnected = true;
+			var objDiv = document.getElementById("log");
+                	objDiv.scrollTop = objDiv.scrollHeight;
+		}
+		else {
+			handleChat(data.user, data.msg, data.time);
+		}
+    });
+        
+    s.addEvent('connect', function () {
+		if (!onceConnected) 
+			s.send("!init");
+					
+		document.getElementById('status').innerHTML='<span style="color: #00CC00;">Connected (Live)</span>';
+					
+		if (onceConnected)
+			log("<b>Link engaged.</b>");
+    });
+        
+    s.addEvent('disconnect', function () {
+		document.getElementById('status').innerHTML='<span style="color: red;">Disconnected</span>';
+	
+        log("<b>Link disengaged.</b>");
+
+        s.connect();
+    });
+}
+
+function handleChat(user, msg, mTime) {
+    var pattern = new RegExp("\\[URL\\].*?\\[\/URL\\]", "g");
+    m = msg.match(pattern);
+
+    if (m != null) {
+    	for(i=0;i<m.length;i++) {
+			handleMedia(user, m[i].replace("[URL]", "").replace("[/URL]", ""), mTime);
+		}
+    }
+
+    msg = linkify(msg.replace("[URL]", "").replace("[/URL]", ""));
+
+    var date = new Date(mTime*1000);
+    var hours = date.getHours();
+    var minutes = date.getMinutes();
+
+    var msgStream = pad(hours)+":"+pad(minutes)+" &lt;"+user+"&gt; "+msg;
+
+    if (!onceConnected)
+        msgStream = "<span style=\"color: #888;\">" + msgStream + "</span>";
+
+    log(msgStream);
+}
+
+function handleMedia(user, msg, mTime) {
+	var youtubeexp = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/ ]{11})/i;
+	ymatch = msg.match(youtubeexp);
+	
+	if (ymatch != null) {
+		postYoutube(user, ymatch[1], mTime);
+	}
+	else if (msg.indexOf("imgur") != -1) {
+		var pattern = new RegExp("imgur.com\/gallery\/[-a-zA-Z0-9_]+|imgur.com\/[-a-zA-Z0-9_]+", "i");
+		m = msg.match(pattern);
+
+		if (m != null) {
+			var ext = '.jpg';
+				
+			if (msg.indexOf(".png") != -1)
+				ext = '.png';
+			else if (msg.indexOf(".gif") != -1)
+				ext = '.gif';
+			else if (msg.indexOf(".jpeg") != -1)
+				ext = '.jpeg';
+		
+			postImage(user, "http://i.imgur.com/" + m[0].replace("imgur.com/", "").replace("gallery/", "") + ext, mTime);
+		}
+	}
+	else if (msg.indexOf(".jpg") != -1 || msg.indexOf(".png") != -1 || msg.indexOf(".gif") != -1 || msg.indexOf(".jpeg") != -1)
+		postImage(user, msg, mTime);
+}
+
+function postImage(user, msg, mTime) {
+    var date = new Date(mTime*1000);
+    var hours = date.getHours();
+    var minutes = date.getMinutes();
+
+    var msgStream = pad(hours)+":"+pad(minutes)+" &lt;"+user+'&gt; <a href="' + msg + '">Media Link</a><br /><a target="_blank" href="' + msg + '"><img width="250" border="0" src="' + msg + '"></a>';
+
+    if (!onceConnected)
+        msgStream = "<span style=\"color: #bbb;\">" + msgStream + "</span>";
+
+    logMedia(msgStream);
+}
+
+function postYoutube(user, id, mTime) {
+    var date = new Date(mTime*1000);
+    var hours = date.getHours();
+    var minutes = date.getMinutes();
+	
+	var msg = '<object width="250" height="199"><param name="movie" value="http://www.youtube.com/v/' + id + '?version=3&amp;hl=en_US&amp;rel=0"></param><param name="allowFullScreen" value="true"></param><param name="allowscriptaccess" value="always"></param><embed src="http://www.youtube.com/v/' + id + '?version=3&amp;hl=en_US&amp;rel=0" type="application/x-shockwave-flash" width="250" height="199" allowscriptaccess="always" allowfullscreen="true"></embed></object>';
+
+    var msgStream = pad(hours)+":"+pad(minutes)+" &lt;"+user+'&gt; <a href="http://www.youtube.com/watch?v=' + id + '">Media Link</a><br />' + msg;
+
+    if (!onceConnected)
+        msgStream = "<span style=\"color: #bbb;\">" + msgStream + "</span>";
+
+    logMedia(msgStream);
+}
+
+function linkify(inputText) {
+    var replaceText, replacePattern1, replacePattern2, replacePattern3;
+
+    //URLs starting with http://, https://, or ftp://
+    replacePattern1 = /(\b(https?|ftp):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/gim;
+    replacedText = inputText.replace(replacePattern1, '<a href="$1" target="_blank">$1</a>');
+
+    return replacedText
+}
+
+function pad(n) {
+    return ("0" + n).slice(-2);
+}
+
+function log(msg){
+    if (onceConnected) {
+        var newMsg = $('<p class="noPad">'+msg+'</p>').hide();
+        $('#log').append(newMsg);
+        newMsg.show('normal', function() {
+                var objDiv = document.getElementById("log");
+                objDiv.scrollTop = objDiv.scrollHeight;
+        });
+    } else {
+        $('#log').append('<p class="noPad">'+msg+'</p>');
+    }
+}
+
+function logMedia(msg){
+    var newMsg = $('<p class="noPad">'+msg+'</p>').hide();
+    $('#media').append(newMsg).find('img').load(function() {
+		// Image is finished loading - drop to the bottom
+		var objDiv = document.getElementById("media");
+       	objDiv.scrollTop = objDiv.scrollHeight;
+    });
+    newMsg.show('normal', function() {
+		var objDiv = document.getElementById("media");
+		objDiv.scrollTop = objDiv.scrollHeight;
+    });
+}
+
+window.onresize = function(event) {
+    document.getElementById('media').style.height = (window.innerHeight - 35)+"px";
+    document.getElementById('log').style.height = (window.innerHeight - 35)+"px";
+    var objDiv = document.getElementById("log");
+    objDiv.scrollTop = objDiv.scrollHeight;
+    var objDiv = document.getElementById("media");
+    objDiv.scrollTop = objDiv.scrollHeight;
+}
+
+$(function() {
+    $('body').mousedown(function(e){if(e.button==1)return false});
+});
+</script>
+
+</head>
+<body onload="init();">
+
+<div id="content-body-wrapper">
+	<div id="header-body">
+		<div class="left"> 
+            <div><b>&nbsp;ts.ericbarch.com Lobby Monitor v0.1.1</b></div>
+		</div>
+		<div class="right">
+            <div id="status" align="center"><span style="color: #33CCFF;">Connecting...</span></div>
+		</div> 
+    </div>
+	<div id="content-body">
+		<div class="left"> 
+            <div id="log" class="overflow"></div>
+		</div>
+		<div class="right">
+            <div id="media" class="overflow"></div>
+		</div> 
+    </div> 
+</div> 
+
+</body>
+</html>
